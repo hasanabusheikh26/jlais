@@ -68,7 +68,7 @@ Always prioritize accuracy over speed, and admit when you're uncertain about vis
         get_job_context().room.register_byte_stream_handler("test", _image_received_handler)
 
         self.session.generate_reply(
-            instructions="Briefly greet the user and offer your assistance."
+            instructions="Greet the child warmly! Say hello in a friendly, playful way and tell them you're excited to see them and play together!"
         )
     
     async def _image_received(self, reader, participant_identity):
