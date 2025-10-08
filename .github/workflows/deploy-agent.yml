@@ -9,6 +9,10 @@ on:
       - '!agent/livekit.toml'
       - '!agent/README.md'
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
