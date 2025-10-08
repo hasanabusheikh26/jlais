@@ -1,0 +1,5 @@
+agents:
+  - name: vision-assistant
+    entrypoint: main.py
+    min_idle: 0
+    max_idle: 2

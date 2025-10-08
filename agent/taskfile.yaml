@@ -1,0 +1,20 @@
+version: "3"
+
+vars:
+  AGENT_NAME: vision-assistant
+
+tasks:
+  setup:
+    desc: Install dependencies
+    cmds:
+      - pip install -r requirements.txt
+
+  dev:
+    desc: Run agent in development mode
+    cmds:
+      - python main.py dev
+
+  start:
+    desc: Run agent in production mode
+    cmds:
+      - python main.py start
