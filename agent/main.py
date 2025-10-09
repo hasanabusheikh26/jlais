@@ -1,8 +1,12 @@
 import logging
 import asyncio
 import base64
+import os
+import time
+from datetime import datetime
 from pyexpat import model
 from dotenv import load_dotenv
+from livekit import api
 # from google.genai import types  # Commented out - web search disabled
 
 from livekit.agents import (
@@ -25,6 +29,9 @@ load_dotenv()
 class VisionAssistant(Agent):
     def __init__(self) -> None:
         self._tasks = []
+        self._egress_id = None
+        self._recording_enabled = os.getenv("ENABLE_RECORDING", "false").lower() == "true"
+        self._session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         super().__init__(
                         instructions="""
 You are a warm, playful AI friend helping young children (ages 3-8) through natural conversation and visual observation.
@@ -90,6 +97,16 @@ Remember: You're here to make children feel AMAZING and CONFIDENT while you obse
         )
 
     async def on_enter(self):
+        logger.info(f"🎬 Agent entering room - Session: {self._session_id}")
+        
+        # Start recording in background (non-blocking)
+        if self._recording_enabled:
+            recording_task = asyncio.create_task(self._start_recording_safe())
+            self._tasks.append(recording_task)
+            recording_task.add_done_callback(lambda t: self._tasks.remove(t))
+        else:
+            logger.info("📹 Recording disabled (ENABLE_RECORDING=false)")
+        
         def _image_received_handler(reader, participant_identity):
             task = asyncio.create_task(
                 self._image_received(reader, participant_identity)
@@ -102,6 +119,86 @@ Remember: You're here to make children feel AMAZING and CONFIDENT while you obse
         self.session.generate_reply(
             instructions="Greet the child warmly! Say hello in a friendly, playful way and tell them you're excited to see them and play together!"
         )
+    
+    async def _start_recording_safe(self):
+        """
+        Start room recording with LiveKit Egress.
+        - Stores on LiveKit Cloud (temporary 48h) OR AWS S3 (if configured)
+        - Non-blocking: runs in background
+        - Full error handling: never crashes the agent
+        """
+        room_name = get_job_context().room.name
+        start_time = time.time()
+        
+        try:
+            logger.info(f"📹 Starting recording for room: {room_name}")
+            
+            # Timeout protection - don't wait forever
+            async with asyncio.timeout(5.0):
+                # Create egress client
+                egress_client = api.EgressService(
+                    api_url=os.getenv("LIVEKIT_URL"),
+                    api_key=os.getenv("LIVEKIT_API_KEY"),
+                    api_secret=os.getenv("LIVEKIT_API_SECRET"),
+                )
+                
+                # Check if S3 is configured (optional for later)
+                use_s3 = (
+                    os.getenv("AWS_ACCESS_KEY") and 
+                    os.getenv("AWS_SECRET_KEY") and 
+                    os.getenv("AWS_BUCKET_NAME")
+                )
+                
+                # Build request
+                if use_s3:
+                    logger.info("☁️ Using AWS S3 storage")
+                    request = api.RoomCompositeEgressRequest(
+                        room_name=room_name,
+                        layout="speaker",
+                        file=api.EncodedFileOutput(
+                            file_type=api.EncodedFileType.MP4,
+                            filepath=f"sessions/{self._session_id}/{room_name}.mp4",
+                            s3=api.S3Upload(
+                                access_key=os.getenv("AWS_ACCESS_KEY"),
+                                secret=os.getenv("AWS_SECRET_KEY"),
+                                region=os.getenv("AWS_REGION", "us-east-1"),
+                                bucket=os.getenv("AWS_BUCKET_NAME"),
+                            )
+                        )
+                    )
+                else:
+                    logger.info("⏱️ Using LiveKit Cloud temporary storage (48h retention)")
+                    request = api.RoomCompositeEgressRequest(
+                        room_name=room_name,
+                        layout="speaker",
+                        file=api.EncodedFileOutput(
+                            file_type=api.EncodedFileType.MP4,
+                            filepath=f"sessions/{self._session_id}/{room_name}.mp4"
+                        )
+                    )
+                
+                # Start the recording
+                info = await egress_client.start_room_composite_egress(request)
+                self._egress_id = info.egress_id
+                
+                duration = time.time() - start_time
+                logger.info(f"✅ Recording started successfully in {duration:.2f}s")
+                logger.info(f"   📊 Egress ID: {self._egress_id}")
+                logger.info(f"   📁 Filepath: sessions/{self._session_id}/{room_name}.mp4")
+                
+                if not use_s3:
+                    logger.warning("⚠️ Using temporary storage - file will be deleted after 48h")
+                
+        except asyncio.TimeoutError:
+            duration = time.time() - start_time
+            logger.warning(f"⚠️ Recording timeout after {duration:.2f}s - continuing without recording")
+            self._egress_id = None
+            
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.error(f"❌ Recording failed after {duration:.2f}s: {e}")
+            logger.error(f"   Agent will continue normally without recording")
+            self._egress_id = None
     
     async def _image_received(self, reader, participant_identity):
         logger.info("Received image from %s: '%s'", participant_identity, reader.info.name)
@@ -141,7 +238,3 @@ async def entrypoint(ctx: JobContext):
 
 if __name__ == "__main__":
     cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
-# Test change
-
-
-
