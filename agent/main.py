@@ -5,9 +5,10 @@ import os
 import time
 import traceback
 from datetime import datetime
-from pyexpat import model
 from dotenv import load_dotenv
+import aiohttp
 from livekit import api
+from livekit.api import egress_service
 # from google.genai import types  # Commented out - web search disabled
 
 from livekit.agents import (
@@ -114,8 +115,8 @@ Remember: You're Sparkle, and you're here to make children feel AMAZING and CONF
         
         # Start recording in background (non-blocking)
         if self._recording_enabled:
-            logger.info("✅ Recording is enabled - starting recording task")
-            recording_task = asyncio.create_task(self._start_recording_safe())
+            logger.info("✅ Recording is enabled - waiting for participants before recording")
+            recording_task = asyncio.create_task(self._wait_and_record())
             self._tasks.append(recording_task)
             recording_task.add_done_callback(lambda t: self._tasks.remove(t))
         else:
@@ -134,6 +135,58 @@ Remember: You're Sparkle, and you're here to make children feel AMAZING and CONF
             instructions="You are Sparkle! Greet the child warmly and introduce yourself as Sparkle, their fun new friend who can see them and is so excited to play together!"
         )
     
+    async def on_exit(self):
+        """Stop recording when agent leaves the room"""
+        if self._egress_id:
+            try:
+                logger.info(f"🛑 Stopping recording: {self._egress_id}")
+                async with aiohttp.ClientSession() as session:
+                    egress_client = egress_service.EgressService(
+                        session,
+                        os.getenv("LIVEKIT_URL"),
+                        os.getenv("LIVEKIT_API_KEY"),
+                        os.getenv("LIVEKIT_API_SECRET"),
+                    )
+                    request = api.StopEgressRequest(egress_id=self._egress_id)
+                    await egress_client.stop_egress(request)
+                    logger.info(f"✅ Recording stopped successfully: {self._egress_id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to stop recording: {e}")
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+    
+    async def _wait_and_record(self):
+        """
+        Wait for participants to join, then start recording.
+        Prevents "no tracks to record" error.
+        """
+        try:
+            room = get_job_context().room
+            logger.info("⏳ Waiting for participants to join before starting recording...")
+            
+            # Wait for at least one remote participant
+            max_wait = 30  # seconds
+            waited = 0
+            while len(room.remote_participants) == 0 and waited < max_wait:
+                await asyncio.sleep(0.5)
+                waited += 0.5
+            
+            if len(room.remote_participants) == 0:
+                logger.warning("⚠️ No participants joined within 30s, skipping recording")
+                return
+            
+            logger.info(f"✅ Participant(s) detected: {len(room.remote_participants)}")
+            logger.info("⏳ Waiting 2s for tracks to be published...")
+            
+            # Give tracks time to be published
+            await asyncio.sleep(2.0)
+            
+            # Now start the recording
+            await self._start_recording_safe()
+            
+        except Exception as e:
+            logger.error(f"❌ Error in _wait_and_record: {e}")
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+    
     async def _start_recording_safe(self):
         """
         Start room recording with LiveKit Egress.
@@ -151,63 +204,65 @@ Remember: You're Sparkle, and you're here to make children feel AMAZING and CONF
             logger.info(f"🔑 RECORDING: Using credentials - URL: {os.getenv('LIVEKIT_URL')}")
             
             # Timeout protection - don't wait forever
-            async with asyncio.timeout(5.0):
-                # Create egress client
+            async with asyncio.timeout(15.0):
+                # Create aiohttp session and egress client
                 logger.info("🔌 RECORDING: Creating egress client...")
-                egress_client = api.EgressService(
-                    api_url=os.getenv("LIVEKIT_URL"),
-                    api_key=os.getenv("LIVEKIT_API_KEY"),
-                    api_secret=os.getenv("LIVEKIT_API_SECRET"),
-                )
-                logger.info("✅ RECORDING: Egress client created")
-                
-                # Check if S3 is configured (optional for later)
-                use_s3 = (
-                    os.getenv("AWS_ACCESS_KEY") and 
-                    os.getenv("AWS_SECRET_KEY") and 
-                    os.getenv("AWS_BUCKET_NAME")
-                )
-                
-                # Build request
-                if use_s3:
-                    logger.info("☁️ RECORDING: Using AWS S3 storage")
-                    request = api.RoomCompositeEgressRequest(
-                        room_name=room_name,
-                        layout="speaker",
-                        file=api.EncodedFileOutput(
-                            file_type=api.EncodedFileType.MP4,
-                            filepath=f"sessions/{self._session_id}/{room_name}.mp4",
-                            s3=api.S3Upload(
-                                access_key=os.getenv("AWS_ACCESS_KEY"),
-                                secret=os.getenv("AWS_SECRET_KEY"),
-                                region=os.getenv("AWS_REGION", "us-east-1"),
-                                bucket=os.getenv("AWS_BUCKET_NAME"),
+                async with aiohttp.ClientSession() as session:
+                    egress_client = egress_service.EgressService(
+                        session,
+                        os.getenv("LIVEKIT_URL"),
+                        os.getenv("LIVEKIT_API_KEY"),
+                        os.getenv("LIVEKIT_API_SECRET"),
+                    )
+                    logger.info("✅ RECORDING: Egress client created")
+                    
+                    # Check if S3 is configured (optional for later)
+                    use_s3 = (
+                        os.getenv("AWS_ACCESS_KEY") and 
+                        os.getenv("AWS_SECRET_KEY") and 
+                        os.getenv("AWS_BUCKET_NAME")
+                    )
+                    
+                    # Build request
+                    if use_s3:
+                        logger.info("☁️ RECORDING: Using AWS S3 storage")
+                        request = api.RoomCompositeEgressRequest(
+                            room_name=room_name,
+                            layout="speaker",
+                            file=api.EncodedFileOutput(
+                                file_type=api.EncodedFileType.MP4,
+                                filepath=f"sessions/{self._session_id}/{room_name}.mp4",
+                                s3=api.S3Upload(
+                                    access_key=os.getenv("AWS_ACCESS_KEY"),
+                                    secret=os.getenv("AWS_SECRET_KEY"),
+                                    region=os.getenv("AWS_REGION", "us-east-1"),
+                                    bucket=os.getenv("AWS_BUCKET_NAME"),
+                                )
                             )
                         )
-                    )
-                else:
-                    logger.info("⏱️ RECORDING: Using LiveKit Cloud temporary storage (48h retention)")
-                    request = api.RoomCompositeEgressRequest(
-                        room_name=room_name,
-                        layout="speaker",
-                        file=api.EncodedFileOutput(
-                            file_type=api.EncodedFileType.MP4,
-                            filepath=f"sessions/{self._session_id}/{room_name}.mp4"
+                    else:
+                        logger.info("⏱️ RECORDING: Using LiveKit Cloud temporary storage (48h retention)")
+                        request = api.RoomCompositeEgressRequest(
+                            room_name=room_name,
+                            layout="speaker",
+                            file=api.EncodedFileOutput(
+                                file_type=api.EncodedFileType.MP4,
+                                filepath=f"sessions/{self._session_id}/{room_name}.mp4"
+                            )
                         )
-                    )
-                
-                logger.info(f"📤 RECORDING: Sending request to LiveKit API...")
-                # Start the recording
-                info = await egress_client.start_room_composite_egress(request)
-                self._egress_id = info.egress_id
-                
-                duration = time.time() - start_time
-                logger.info(f"✅ RECORDING: Recording started successfully in {duration:.2f}s")
-                logger.info(f"   📊 RECORDING: Egress ID: {self._egress_id}")
-                logger.info(f"   📁 RECORDING: Filepath: sessions/{self._session_id}/{room_name}.mp4")
-                
-                if not use_s3:
-                    logger.warning("⚠️ RECORDING: Using temporary storage - file will be deleted after 48h")
+                    
+                    logger.info(f"📤 RECORDING: Sending request to LiveKit API...")
+                    # Start the recording
+                    info = await egress_client.start_room_composite_egress(request)
+                    self._egress_id = info.egress_id
+                    
+                    duration = time.time() - start_time
+                    logger.info(f"✅ RECORDING: Recording started successfully in {duration:.2f}s")
+                    logger.info(f"   📊 RECORDING: Egress ID: {self._egress_id}")
+                    logger.info(f"   📁 RECORDING: Filepath: sessions/{self._session_id}/{room_name}.mp4")
+                    
+                    if not use_s3:
+                        logger.warning("⚠️ RECORDING: Using temporary storage - file will be deleted after 48h")
                 
         except asyncio.TimeoutError:
             duration = time.time() - start_time
