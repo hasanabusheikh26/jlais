@@ -16,3 +16,5 @@ spec:
         secretKeyRef:
           name: google-credentials
           key: api-key
+    - name: ENABLE_RECORDING
+      value: "true"
