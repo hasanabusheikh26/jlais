@@ -131,7 +131,7 @@ Remember: You're Sparkle, and you're here to make children feel AMAZING and CONF
         get_job_context().room.register_byte_stream_handler("test", _image_received_handler)
 
         self.session.generate_reply(
-            instructions="instructions="You are Sparkle! Greet the child warmly and introduce yourself as Sparkle, their fun new friend who can see them and is so excited to play together!""
+            instructions="You are Sparkle! Greet the child warmly and introduce yourself as Sparkle, their fun new friend who can see them and is so excited to play together!"
         )
     
     async def _start_recording_safe(self):
