@@ -3,6 +3,7 @@ import asyncio
 import base64
 import os
 import time
+import traceback
 from datetime import datetime
 from pyexpat import model
 from dotenv import load_dotenv
@@ -97,15 +98,20 @@ Remember: You're here to make children feel AMAZING and CONFIDENT while you obse
         )
 
     async def on_enter(self):
+        # Debug logging
+        enable_recording_env = os.getenv("ENABLE_RECORDING", "not_set")
         logger.info(f"🎬 Agent entering room - Session: {self._session_id}")
+        logger.info(f"🔍 DEBUG: ENABLE_RECORDING env var = '{enable_recording_env}'")
+        logger.info(f"🔍 DEBUG: self._recording_enabled = {self._recording_enabled}")
         
         # Start recording in background (non-blocking)
         if self._recording_enabled:
+            logger.info("✅ Recording is enabled - starting recording task")
             recording_task = asyncio.create_task(self._start_recording_safe())
             self._tasks.append(recording_task)
             recording_task.add_done_callback(lambda t: self._tasks.remove(t))
         else:
-            logger.info("📹 Recording disabled (ENABLE_RECORDING=false)")
+            logger.warning(f"⚠️ Recording disabled - ENABLE_RECORDING='{enable_recording_env}'")
         
         def _image_received_handler(reader, participant_identity):
             task = asyncio.create_task(
@@ -130,17 +136,22 @@ Remember: You're here to make children feel AMAZING and CONFIDENT while you obse
         room_name = get_job_context().room.name
         start_time = time.time()
         
+        logger.info(f"🎥 RECORDING: Entered _start_recording_safe() for room: {room_name}")
+        
         try:
-            logger.info(f"📹 Starting recording for room: {room_name}")
+            logger.info(f"📹 RECORDING: Starting recording for room: {room_name}")
+            logger.info(f"🔑 RECORDING: Using credentials - URL: {os.getenv('LIVEKIT_URL')}")
             
             # Timeout protection - don't wait forever
             async with asyncio.timeout(5.0):
                 # Create egress client
+                logger.info("🔌 RECORDING: Creating egress client...")
                 egress_client = api.EgressService(
                     api_url=os.getenv("LIVEKIT_URL"),
                     api_key=os.getenv("LIVEKIT_API_KEY"),
                     api_secret=os.getenv("LIVEKIT_API_SECRET"),
                 )
+                logger.info("✅ RECORDING: Egress client created")
                 
                 # Check if S3 is configured (optional for later)
                 use_s3 = (
@@ -151,7 +162,7 @@ Remember: You're here to make children feel AMAZING and CONFIDENT while you obse
                 
                 # Build request
                 if use_s3:
-                    logger.info("☁️ Using AWS S3 storage")
+                    logger.info("☁️ RECORDING: Using AWS S3 storage")
                     request = api.RoomCompositeEgressRequest(
                         room_name=room_name,
                         layout="speaker",
@@ -167,7 +178,7 @@ Remember: You're here to make children feel AMAZING and CONFIDENT while you obse
                         )
                     )
                 else:
-                    logger.info("⏱️ Using LiveKit Cloud temporary storage (48h retention)")
+                    logger.info("⏱️ RECORDING: Using LiveKit Cloud temporary storage (48h retention)")
                     request = api.RoomCompositeEgressRequest(
                         room_name=room_name,
                         layout="speaker",
@@ -177,26 +188,31 @@ Remember: You're here to make children feel AMAZING and CONFIDENT while you obse
                         )
                     )
                 
+                logger.info(f"📤 RECORDING: Sending request to LiveKit API...")
                 # Start the recording
                 info = await egress_client.start_room_composite_egress(request)
                 self._egress_id = info.egress_id
                 
                 duration = time.time() - start_time
-                logger.info(f"✅ Recording started successfully in {duration:.2f}s")
-                logger.info(f"   📊 Egress ID: {self._egress_id}")
-                logger.info(f"   📁 Filepath: sessions/{self._session_id}/{room_name}.mp4")
+                logger.info(f"✅ RECORDING: Recording started successfully in {duration:.2f}s")
+                logger.info(f"   📊 RECORDING: Egress ID: {self._egress_id}")
+                logger.info(f"   📁 RECORDING: Filepath: sessions/{self._session_id}/{room_name}.mp4")
                 
                 if not use_s3:
-                    logger.warning("⚠️ Using temporary storage - file will be deleted after 48h")
+                    logger.warning("⚠️ RECORDING: Using temporary storage - file will be deleted after 48h")
                 
         except asyncio.TimeoutError:
             duration = time.time() - start_time
-            logger.warning(f"⚠️ Recording timeout after {duration:.2f}s - continuing without recording")
+            logger.error(f"❌ RECORDING TIMEOUT: Failed after {duration:.2f}s")
+            logger.error(f"   This usually means the egress service is not responding")
             self._egress_id = None
             
         except Exception as e:
             duration = time.time() - start_time
-            logger.error(f"❌ Recording failed after {duration:.2f}s: {e}")
+            logger.error(f"❌ RECORDING FAILED: Error after {duration:.2f}s")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            logger.error(f"   Exception message: {str(e)}")
+            logger.error(f"   Traceback: {traceback.format_exc()}")
             logger.error(f"   Agent will continue normally without recording")
             self._egress_id = None
     
