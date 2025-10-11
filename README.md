@@ -9,6 +9,16 @@ It contains a native iOS frontend, built on LiveKit's [Swift SDK](https://github
 
 <img src="screenshot.jpg" height="512">
 
+## 🐕 NEW: PiDog Robot Integration
+
+Transform your [SunFounder PiDog](https://www.sunfounder.com/products/pidog-robot-dog) into an AI-powered companion! This repo now includes a complete integration that gives PiDog:
+
+- **🎙️ Voice conversation** with Gemini multimodal AI
+- **👁️ Vision** through its camera with real-time understanding
+- **🦾 Physical actions** triggered by natural language commands
+
+**[→ Go to PiDog Agent](./pidog-agent/)** | **[Quick Start Guide](./pidog-agent/QUICKSTART.md)**
+
 # Features
 
 ### Real-time Video & Audio
