@@ -1,0 +1,7 @@
+# Hardware Server Requirements (for Raspberry Pi only)
+flask>=3.0.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Note: Install pidog, robot-hat, vilib from source (see DEPLOY.md)
+# Note: opencv and numpy installed via apt (python3-opencv, python3-numpy)

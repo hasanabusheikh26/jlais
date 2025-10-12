@@ -1,235 +1,110 @@
-# 🐕 PiDog LiveKit + Gemini Agent
+# 🐕 PiDog LiveKit + Gemini Agent (Hybrid Architecture)
 
 Transform your SunFounder PiDog into an AI-powered companion with vision, voice, and real-time physical interaction!
 
+## 🎯 Architecture
+
+This uses a **hybrid approach** to work around LiveKit's ARM64 incompatibility:
+
+```
+User (Browser) ←→ LiveKit Cloud ←→ AI Agent (Mac/Cloud) ←→ HTTP API ←→ Hardware Server (Pi)
+```
+
+**Two components:**
+1. **AI Agent** (`pidog_agent_remote.py`) - Runs on Mac/Cloud, handles LiveKit + Gemini
+2. **Hardware Server** (`pidog_hardware_server.py`) - Runs on Pi, controls PiDog hardware
+
+---
+
 ## ✨ Features
 
-- **Real-time Voice Conversations**: Natural dialogue via Gemini 2.0 Flash (<500ms latency)
-- **Vision**: See through PiDog's camera and understand the environment  
-- **Physical Actions**: Voice commands trigger robot movements (sit, bark, wag tail, 20+ actions)
-- **Mock Mode**: Test locally without hardware before deploying to Pi
-- **WebRTC Streaming**: Low-latency video/audio via LiveKit
+- **🎙️ Voice Conversations**: Natural dialogue via Gemini 2.0 Flash (<500ms latency)
+- **👁️ Vision**: See through PiDog's camera and understand the environment
+- **🦾 Physical Actions**: Voice commands trigger robot movements (sit, bark, wag tail, 20+ actions)
+- **☁️ Cloud-Ready**: Agent can run anywhere (Mac, AWS, GCP, etc.)
+- **🔌 Simple API**: Clean HTTP API between agent and hardware
 
-## 🎯 Quick Start
+---
 
-### Test Locally (Mac/Linux/Windows)
+## 🚀 Quick Start
 
-```bash
-# Clone and navigate
-cd pidog-agent
-
-# Install dependencies (without hardware libs)
-pip install -r requirements.txt
-
-# Configure
-cp .env.example .env
-# Edit .env with your LiveKit & Gemini API keys
-
-# Run in mock mode
-python pidog_agent.py dev
-```
-
-Connect via [LiveKit Agents Playground](https://agents-playground.livekit.io) and talk to PiDog!
-
-### Deploy to Raspberry Pi
+### Part 1: Start Hardware Server on Pi
 
 ```bash
-# On your Pi
-git clone <your-repo-url>
-cd pidog-agent
+# On Raspberry Pi
+cd ~/jlais/pidog-agent
 
-# Install all dependencies including hardware
-pip install -r requirements.txt
-pip install pidog robot-hat
+# Install dependencies
+pip3 install flask requests python-dotenv
+sudo apt install -y python3-opencv python3-numpy
 
-# Install vilib (camera library)
-cd ~
-git clone -b picamera2 https://github.com/sunfounder/vilib.git --depth 1
-cd vilib
-sudo python3 install.py
-
-# Configure
-cd ~/pidog-agent
-cp .env.example .env
-nano .env  # Add your API keys
-
-# Run
-python pidog_agent.py dev
+# Install PiDog hardware (see DEPLOY.md for details)
+# Then run:
+python3 pidog_hardware_server.py
 ```
 
-## 🔑 Get API Keys
+Server will start on `http://0.0.0.0:5000`
 
-### LiveKit Cloud (Free)
-1. Sign up: https://cloud.livekit.io
-2. Create project
-3. Go to Settings → Keys
-4. Copy: `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`
+### Part 2: Start AI Agent on Mac
 
-### Google Gemini (Free tier: 1500 requests/day)
-1. Get key: https://aistudio.google.com/app/apikey
-2. Copy: `GOOGLE_API_KEY`
-
-## 🎮 Usage
-
-Once running, connect via the [Agents Playground](https://agents-playground.livekit.io):
-
-1. Select your LiveKit project
-2. Click "Connect"
-3. **Start talking!**
-
-### Example Commands
-
-**Conversation:**
-- "Hello PiDog!"
-- "What can you see?"
-- "Tell me about yourself"
-
-**Actions:**
-- "Sit down"
-- "Wag your tail"
-- "Give me a high five"
-- "Do a push up"
-- "Bark"
-- "Stretch"
-
-**Vision:**
-- "What color is my shirt?"
-- "Can you see this?" (show object)
-- "Describe what's around you"
-
-## 🏗️ Architecture
-
-```
-User (Browser) ←→ LiveKit Cloud ←→ PiDog Agent (Pi)
-      ↓                                    ↓
-  Audio/Video                      Gemini 2.0 Flash
-                                           ↓
-                                   PiDog Controller
-                                           ↓
-                                   Hardware Actions
-```
-
-### Why It's Fast
-
-**Traditional (OpenAI approach):**
-```
-Speech → Whisper STT → GPT-4 → OpenAI TTS → Audio
-         ~500ms         ~1s       ~500ms
-Total: 2-3 seconds delay
-```
-
-**LiveKit + Gemini:**
-```
-Audio/Video → Gemini Multimodal → Audio/Actions
-              ~200-400ms
-Total: <500ms delay
-```
-
-## 📁 Project Structure
-
-```
-pidog-agent/
-├── pidog_agent.py          # Main agent (LiveKit + Gemini integration)
-├── pidog_controller.py     # Hardware abstraction (auto-detects mock vs real)
-├── pidog_actions.py        # Action definitions for function calling
-├── requirements.txt        # Python dependencies
-├── .env.example           # Environment variables template
-└── README.md              # This file
-```
-
-## 🎨 Customization
-
-### Change Personality
-
-Edit `pidog_agent.py`, modify the `instructions` parameter:
-
-```python
-instructions="""You are RoboDog, a tough guard dog.
-Be serious, protective, and loyal. Bark at strangers!"""
-```
-
-### Add Custom Actions
-
-In `pidog_actions.py`:
-
-```python
-PIDOG_ACTIONS = {
-    # ... existing actions ...
-    "dance": "Do a little dance",
-    "patrol": "Walk in a patrol pattern",
-}
-```
-
-### Adjust Camera Quality
-
-In `pidog_agent.py`, change `_start_pidog_camera()`:
-
-```python
-# High quality (slower)
-self._video_source = rtc.VideoSource(1920, 1080)
-await asyncio.sleep(0.1)  # 10 FPS
-
-# Low latency (recommended)
-self._video_source = rtc.VideoSource(640, 480)
-await asyncio.sleep(0.2)  # 5 FPS
-```
-
-## 🐛 Troubleshooting
-
-### Mock mode not working locally
-
-**Issue**: Import errors for opencv/numpy
-
-**Solution**:
 ```bash
-pip install opencv-python numpy
+# On your Mac
+cd /Users/has/Desktop/Dev/AgentX/pidog-agent
+source ../agent/.venv/bin/activate
+
+# Install dependencies
+pip install requests
+
+# Configure .env with Pi's IP
+nano .env
+# Add: PIDOG_PI_HOST=192.168.1.100
+
+# Run agent
+python pidog_agent_remote.py dev
 ```
 
-### PiDog doesn't move on Pi
+### Part 3: Connect and Play!
 
-**Issue**: Hardware not responding
+1. Open https://agents-playground.livekit.io
+2. Select your LiveKit project
+3. Click **Connect**
+4. Start talking: "Hello PiDog!", "Sit down", "What do you see?"
 
-**Check**:
+---
+
+## 📁 Files
+
+| File | Runs On | Purpose |
+|------|---------|---------|
+| `pidog_hardware_server.py` | **Raspberry Pi** | Flask API server, controls hardware |
+| `pidog_agent_remote.py` | **Mac/Cloud** | LiveKit + Gemini AI agent |
+| `pidog_controller_remote.py` | **Mac/Cloud** | HTTP client for remote control |
+| `pidog_actions.py` | **Both** | Action definitions for function calling |
+| `requirements.txt` | **Mac/Cloud** | Python packages for agent |
+| `requirements-pi.txt` | **Raspberry Pi** | Python packages for hardware server |
+| `DEPLOY.md` | - | **Complete deployment guide** |
+
+---
+
+## 🔑 Configuration
+
+Edit `.env` file:
+
 ```bash
-# Test PiDog library
-python -c "from pidog import Pidog; dog = Pidog(); dog.do_action('sit', speed=50)"
+# LiveKit credentials
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=APIxxxxxx
+LIVEKIT_API_SECRET=xxxxxxxx
 
-# Check permissions (might need sudo)
-sudo python pidog_agent.py dev
+# Gemini API
+GOOGLE_API_KEY=AIzaSyxxxxxx
+
+# Pi hardware server
+PIDOG_PI_HOST=192.168.1.100  # Your Pi's IP
+PIDOG_PI_PORT=5000
 ```
 
-### Camera not working on Pi
-
-**Issue**: No video stream
-
-**Check**:
-```bash
-# Test camera
-python -c "from vilib import Vilib; Vilib.camera_start(); Vilib.camera_close()"
-
-# Enable camera in raspi-config
-sudo raspi-config
-# → Interface Options → Camera → Enable
-```
-
-### High latency / Slow responses
-
-**Solution**: Reduce camera quality in code (see Customization section)
-
-### "Connection refused" error
-
-**Check**: Your `.env` file has correct credentials
-```bash
-cat .env | grep LIVEKIT
-# Should show wss:// URL and API keys
-```
-
-## 🔒 Security
-
-- Never commit `.env` to git
-- Set proper file permissions: `chmod 600 .env`
-- Use LiveKit room tokens for production
-- Keep API keys secret
+---
 
 ## 📚 Available Actions
 
@@ -244,31 +119,91 @@ cat .env | grep LIVEKIT
 
 See `pidog_actions.py` for complete list.
 
+---
+
+## 🐛 Troubleshooting
+
+**Can't connect to Pi:**
+```bash
+# Test connection
+curl http://192.168.1.100:5000/health
+
+# Check Pi's actual IP
+# On Pi: hostname -I
+```
+
+**Hardware not responding on Pi:**
+```bash
+# Test hardware directly
+python3 -c "from pidog import Pidog; dog = Pidog(); print('OK')"
+```
+
+**Agent can't see camera:**
+- Verify hardware server is running on Pi
+- Check network connectivity
+- Look at Pi terminal for camera errors
+
+---
+
+## 🎨 Why Hybrid Architecture?
+
+**Problem**: LiveKit's Python SDK doesn't ship ARM64 binaries for Raspberry Pi
+
+**Solution**: 
+- ✅ Agent runs on Mac/Cloud (has LiveKit support)
+- ✅ Pi only handles hardware (simpler, works great)
+- ✅ HTTP API connects them (clean, production-ready)
+- ✅ Can scale to multiple Pis, cloud hosting, etc.
+
+**This is actually how production robotics systems work!**
+
+---
+
+## 🚀 Production Deployment
+
+**Run agent in cloud:**
+- AWS EC2, Google Cloud Run, DigitalOcean
+- Set Pi's public IP or use VPN
+- Scale horizontally
+
+**Or keep agent on Mac:**
+- Works great for home/office use
+- Low latency on local network
+- Easy to debug
+
+See `DEPLOY.md` for complete guide!
+
+---
+
+## 📖 Full Documentation
+
+- **Quick Setup**: See above
+- **Detailed Deployment**: `DEPLOY.md`
+- **Troubleshooting**: This README + `DEPLOY.md`
+
+---
+
 ## 🤝 Contributing
 
 Found a bug? Want to add features?
-
 1. Fork the repo
 2. Create a branch
 3. Make changes
 4. Submit PR
 
+---
+
 ## 📄 License
 
-MIT License - See LICENSE file
+MIT License
+
+---
 
 ## 🔗 Resources
 
-- **LiveKit Agents**: https://docs.livekit.io/agents
-- **Gemini API**: https://ai.google.dev/gemini-api
-- **PiDog Docs**: https://docs.sunfounder.com/projects/pidog
-- **Vilib**: https://github.com/sunfounder/vilib
-
-## 💬 Support
-
-- LiveKit Discord: https://discord.gg/livekit
-- SunFounder Forum: https://forum.sunfounder.com
-- Issues: GitHub Issues tab
+- **LiveKit**: https://docs.livekit.io/agents
+- **Gemini**: https://ai.google.dev/gemini-api
+- **PiDog**: https://docs.sunfounder.com/projects/pidog
 
 ---
 

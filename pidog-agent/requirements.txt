@@ -1,16 +1,10 @@
-# LiveKit + Gemini (Core dependencies)
+# LiveKit + Gemini Agent (runs on Mac/Cloud, not Pi)
 livekit-agents[google,images]>=1.2.0
 python-dotenv>=1.0.0
 
-# Vision/Image Processing
+# HTTP client for communicating with Pi hardware server
+requests>=2.31.0
+
+# Image processing (for handling camera frames from Pi)
 opencv-python>=4.8.0
 numpy>=1.24.0
-
-# PiDog Hardware (only install on Raspberry Pi)
-# Uncomment these lines when installing on the Pi:
-# pidog>=1.0.0
-# robot-hat>=2.0.0
-# Note: vilib is installed separately via git clone
-
-# Note: For local testing (Mac/Windows), don't install pidog/robot-hat
-# The controller will automatically use mock mode

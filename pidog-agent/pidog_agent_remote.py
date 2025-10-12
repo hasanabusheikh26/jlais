@@ -15,31 +15,32 @@ from livekit.agents import (
 from livekit.plugins import google
 from livekit import rtc
 
-# Import PiDog components
-from pidog_controller import PiDogController
+# Import REMOTE PiDog controller
+from pidog_controller_remote import PiDogControllerRemote
 from pidog_actions import get_pidog_functions
 
-logger = logging.getLogger("pidog-agent")
+logger = logging.getLogger("pidog-agent-remote")
 load_dotenv()
 
 
-class PiDogAgent(Agent):
+class PiDogAgentRemote(Agent):
     """
-    PiDog AI Agent with LiveKit + Gemini Multimodal
+    PiDog AI Agent with LiveKit + Gemini (Remote Mode)
     
-    Features:
-    - Real-time voice conversation via Gemini 2.0 Flash
-    - Vision through PiDog camera (streamed to LiveKit room)
-    - Physical actions via Gemini function calling
-    - Automatic mock mode for testing without hardware
+    This runs on your Mac/Cloud and controls Pi hardware remotely.
+    The Pi must be running pidog_hardware_server.py
     """
     
-    def __init__(self) -> None:
+    def __init__(self, pi_host: str = None) -> None:
         self._tasks = []
         
-        # Initialize PiDog hardware controller (auto-detects mock vs real)
-        logger.info("🐕 Initializing PiDog...")
-        self._pidog = PiDogController()
+        # Get Pi host from environment or parameter
+        pi_host = pi_host or os.getenv("PIDOG_PI_HOST", "raspberrypi.local")
+        pi_port = int(os.getenv("PIDOG_PI_PORT", "5000"))
+        
+        # Initialize REMOTE PiDog controller
+        logger.info(f"🐕 Connecting to PiDog at {pi_host}:{pi_port}...")
+        self._pidog = PiDogControllerRemote(pi_host=pi_host, pi_port=pi_port)
         
         # Video streaming setup
         self._video_source = None
@@ -148,19 +149,18 @@ Remember: You're a robot dog - be playful, eager to please, and always ready for
             logger.error(f"❌ Failed to start camera: {e}")
     
     async def _camera_loop(self):
-        """Continuously capture frames from PiDog camera"""
+        """Continuously capture frames from PiDog camera via HTTP"""
         while True:
             try:
-                # Get frame from PiDog (works in both mock and real mode)
+                # Get frame from PiDog (over network)
                 frame = self._pidog.get_camera_frame()
                 
                 if frame is not None and self._video_source:
                     # Convert numpy array to LiveKit video frame
-                    # Note: frame is already in correct format (H, W, C)
                     video_frame = rtc.VideoFrame(
                         width=frame.shape[1],
                         height=frame.shape[0],
-                        type=rtc.VideoBufferType.RGB24,  # OpenCV BGR, but we'll handle conversion
+                        type=rtc.VideoBufferType.RGB24,
                         data=frame.tobytes()
                     )
                     self._video_source.capture_frame(video_frame)
@@ -168,27 +168,16 @@ Remember: You're a robot dog - be playful, eager to please, and always ready for
             except Exception as e:
                 logger.error(f"Camera capture error: {e}")
             
-            await asyncio.sleep(0.2)  # 5 FPS (adjust for performance)
+            await asyncio.sleep(0.2)  # 5 FPS
     
     async def on_function_call(self, function_name: str, arguments: dict):
         """
-        Handle Gemini function calls - execute PiDog physical actions.
-        
-        This is the bridge between AI and hardware!
-        When Gemini decides to call a function (like "sit" or "bark"),
-        this method executes the physical action on the robot.
-        
-        Args:
-            function_name: Name of the action (e.g., "sit", "wag_tail")
-            arguments: Parameters (e.g., {"speed": 80, "steps": 3})
-        
-        Returns:
-            dict: Result of the action
+        Handle Gemini function calls - execute PiDog physical actions remotely.
         """
         logger.info(f"🎯 Function called: {function_name} with args: {arguments}")
         
         try:
-            # Execute the physical action via controller
+            # Execute the physical action via HTTP API
             result = self._pidog.perform_action(function_name, **arguments)
             logger.info(f"✅ Action '{function_name}' executed")
             return result
@@ -200,13 +189,13 @@ Remember: You're a robot dog - be playful, eager to please, and always ready for
 
 async def entrypoint(ctx: JobContext):
     """Main entry point for LiveKit agent"""
-    logger.info("🚀 Starting PiDog agent...")
+    logger.info("🚀 Starting PiDog agent (remote mode)...")
     
     await ctx.connect()
     
     session = AgentSession()
     await session.start(
-        agent=PiDogAgent(),
+        agent=PiDogAgentRemote(),
         room=ctx.room,
         room_input_options=RoomInputOptions(
             video_enabled=True,  # Enable video from user
